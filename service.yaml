@@ -11,6 +11,7 @@ run:
       corepack enable pnpm
       pnpm install 
       pnpm run start
+    workdir: /app
 env:
   SLACK_BOT_TOKEN:
     secret: slackbot-token
