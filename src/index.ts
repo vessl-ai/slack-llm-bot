@@ -138,6 +138,10 @@ async function summarizeText(
       if (speaker === "summarizer") {
         continue;
       }
+      if (chat.text.startsWith("<@U07AF4DJWRH>")) {
+        // ignore commands
+        continue;
+      }
       for (const userId of Object.keys(usersMap)) {
         chat.text = chat.text.replace(
           `<@${userId}>`,
@@ -190,21 +194,63 @@ async function postMessage(
 async function handleSummarizeRequest(
   channelId: string,
   question?: string,
-  threadTs?: string
+  threadTs?: string,
+  limit: number = 10
 ) {
-  const messages = await fetchRecentMessages(channelId, 10, threadTs);
+  const messages = await fetchRecentMessages(channelId, limit, threadTs);
   if (messages.length > 0) {
     const summary = await summarizeText(messages, question);
 
-    if (threadTs) {
-      // Post in the same thread
-      await postMessage(channelId, `${summary}`, threadTs);
-    } else {
-      // Post in the channel
-      await postMessage(channelId, `${summary}`);
-    }
+    await postMessage(channelId, `${summary}`, threadTs);
   }
 }
+
+const options: { [key: string]: string } = {
+  "--help": "Show help",
+  "--version": "Show version",
+  "--limit": "Set the limit of messages to summarize",
+};
+
+app.event("app_mention", async ({ event, context }) => {
+  try {
+    const { channel, thread_ts, text } = event;
+    console.log("Event: ", text);
+    let prompt = text.split(" ").slice(1).join(" ");
+    console.log("Prompt: ", prompt);
+
+    if (prompt.trim() === "--help") {
+      let helpText =
+        "```Usage: @Summarizer [summarize|question] [options]\n If no question is provided but 'summarize', the last 10 messages will be summarized.\n";
+      helpText += Object.keys(options)
+        .map((key) => `${key}: ${options[key]}`)
+        .join("\n");
+      helpText += "```";
+      await postMessage(event.channel, helpText, thread_ts);
+      return;
+    }
+
+    if (prompt.trim() === "--version") {
+      await postMessage(event.channel, "v1.0.0", thread_ts);
+      return;
+    }
+
+    let question: string | undefined = undefined;
+    let limit = 10;
+    if (prompt.includes("--limit")) {
+      let parts = prompt.split("--limit");
+      prompt = parts[0];
+      limit = parseInt(parts[1].trim()) || 10;
+    }
+
+    if (prompt.trim() !== "summarize") {
+      question = prompt;
+    }
+
+    await handleSummarizeRequest(channel, question, thread_ts, limit);
+  } catch (error) {
+    console.error(`Error handling app_mention event: ${error}`);
+  }
+});
 
 app.message(
   /!summarize\s*(".*")?\s*([0-9]*)/,
@@ -215,10 +261,7 @@ app.message(
       console.log("Question: ", question);
       console.log("Limit: ", limit);
       const { channel, thread_ts } = message as SlackMessage;
-      const messages = await fetchRecentMessages(channel, limit, thread_ts);
-      if (messages.length > 0) {
-        await handleSummarizeRequest(channel, question, thread_ts);
-      }
+      await handleSummarizeRequest(channel, question, thread_ts, limit);
     } catch (error) {
       console.error(`Error handling message event: ${error}`);
     }

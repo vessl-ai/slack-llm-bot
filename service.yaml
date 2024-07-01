@@ -8,7 +8,7 @@ import:
   /app: git://github.com/vessl-ai/slack-llm-bot.git
 run:
   - command: |
-      corepack enable pnpm
+      npm i -g pnpm
       pnpm install 
       pnpm run start
     workdir: /app
