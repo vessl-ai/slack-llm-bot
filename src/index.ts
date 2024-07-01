@@ -79,26 +79,43 @@ const systemPrompt: {
 } = {
   role: "system",
   content:
-    "You are a helpful assistant. You will summarize the conversation using the language of the input. You should look into all the external resources and summarize the conversation.",
+    "You are a helpful assistant. You will summarize the conversation using the language of the input. You should look into all the external resources and summarize the conversation. Conversation is in the form of `<speaker>: <content>`. Summarize should contain speaker names.",
 };
+
+async function getUserMap(users: string[]): Promise<Map<string, string>> {
+  const userMap = new Map<string, string>();
+  for (const user of users) {
+    const userInfo = await app.client.users.info({
+      user: user,
+    });
+    userMap.set(user, userInfo.user?.name || "Unknown");
+  }
+  return userMap;
+}
 
 async function summarizeText(chats: SlackMessage[]): Promise<string> {
   try {
+    const usersMap = await getUserMap(chats.map((chat) => chat.user));
     const messages: {
       role: "user";
       content: string;
       user: string;
     }[] = [];
     for (const chat of chats) {
-      const userInfo = await app.client.users.info({
-        user: chat.user,
-      });
+      for (const userId of Object.keys(usersMap)) {
+        chat.text = chat.text.replace(
+          `<@${userId}>`,
+          usersMap.get(userId) || "Unknown"
+        );
+      }
+      const speaker = usersMap.get(chat.user) || "Unknown";
       messages.push({
         role: "user",
-        content: chat.text,
-        user: userInfo.user?.name || "Unknown",
+        content: `${speaker}: ${chat.text}`,
+        user: speaker,
       });
     }
+    console.log(messages.map((m) => m.user + ": " + m.content).join("\n"));
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [systemPrompt, ...messages],
@@ -129,7 +146,6 @@ async function postMessage(
 async function handleSummarizeRequest(channelId: string, threadTs?: string) {
   const messages = await fetchRecentMessages(channelId, 10, threadTs);
   if (messages.length > 0) {
-    console.log(messages.map((m) => m.user));
     const summary = await summarizeText(messages);
 
     if (threadTs) {
@@ -142,10 +158,11 @@ async function handleSummarizeRequest(channelId: string, threadTs?: string) {
   }
 }
 
-app.message("!summarize", async ({ message, say }) => {
+app.message(/!summarize\s*([0-9]*)/, async ({ context, message, say }) => {
   try {
+    const limit = parseInt(context.matches[1]) || 10;
     const { channel, thread_ts } = message as SlackMessage;
-    const messages = await fetchRecentMessages(channel, 10, thread_ts);
+    const messages = await fetchRecentMessages(channel, limit, thread_ts);
     if (messages.length > 0) {
       await handleSummarizeRequest(channel, thread_ts);
     }
