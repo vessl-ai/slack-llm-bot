@@ -1,0 +1,32 @@
+name: slack-summarize-chatbot
+message: Summarizer
+image: quay.io/vessl-ai/torch:2.1.0-cuda12.2-r3
+resources:
+  cluster: vessl-aws-seoul
+  preset: cpu-medium
+import:
+  /app:
+    git: https://github.com/vessl-ai/slack-summarize-chatbot.git
+run:
+  - command: |
+      pnpm install 
+      pnpm run start
+env:
+  SERVICE_AUTH_KEY:
+    secret: slackbot-auth-key
+    source: secret
+  SLACK_BOT_TOKEN:
+    secret: slackbot-token
+    source: secret
+  OPENAI_API_KEY:
+    secret: openai-api-key
+    source: secret
+ports:
+  - port: 3000
+service:
+  autoscaling:
+    max: 2
+    metric: cpu
+    min: 1
+    target: 50
+  expose: 3000

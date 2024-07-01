@@ -1,0 +1,26 @@
+{
+  "name": "slack-chat-summarizer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "ts-node src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@slack/bolt": "^3.19.0",
+    "@slack/events-api": "^3.0.1",
+    "@slack/web-api": "^7.2.0",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "openai": "^4.52.2",
+    "tsc": "^2.0.4",
+    "typescript": "^5.5.2"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
+  }
+}
