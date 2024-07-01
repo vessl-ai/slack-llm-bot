@@ -73,14 +73,40 @@ async function fetchRecentMessages(
   }
 }
 
-const systemPrompt: {
+// const systemPrompt = (
+//   question?: string
+// ): {
+//   role: "system";
+//   content: string;
+// } => {
+//   if (question) {
+//     return {
+//       role: "system",
+//       content: question,
+//     };
+//   } else {
+//     return {
+//       role: "system",
+//       content:
+//         "You are a helpful assistant. You will summarize the conversation using the same language of the speakers, which will be one of Korean or English. You should answer the question if the last message starts with @#*&. The summary result should contain speaker names from original messages.",
+//     };
+//   }
+// };
+
+const systemPrompt = (
+  question?: string
+): {
   role: "system";
   content: string;
-} = {
-  role: "system",
-  content:
-    "You are a helpful assistant. You will summarize the conversation using the language of the input. You should look into all the external resources and summarize the conversation. Conversation is in the form of `<speaker>: <content>`. Summarize should contain speaker names.",
+} => {
+  return {
+    role: "system",
+    content:
+      "You are a helpful assistant. You will summarize the conversation using Korean only. You should answer the question if the last message starts with `@#*&Question: ` else you just create a helpful summary WITHOUT ORIGINAL MESSAGES. The summary should contain speaker names. Do not include the messages directly in the summary.",
+  };
 };
+
+//@#*&
 
 async function getUserMap(users: string[]): Promise<Map<string, string>> {
   const userMap = new Map<string, string>();
@@ -93,7 +119,10 @@ async function getUserMap(users: string[]): Promise<Map<string, string>> {
   return userMap;
 }
 
-async function summarizeText(chats: SlackMessage[]): Promise<string> {
+async function summarizeText(
+  chats: SlackMessage[],
+  question?: string
+): Promise<string> {
   try {
     const usersMap = await getUserMap(chats.map((chat) => chat.user));
     const messages: {
@@ -102,23 +131,38 @@ async function summarizeText(chats: SlackMessage[]): Promise<string> {
       user: string;
     }[] = [];
     for (const chat of chats) {
+      if (chat.text.startsWith("!summarize")) {
+        continue;
+      }
+      const speaker = usersMap.get(chat.user) || "Unknown";
+      if (speaker === "summarizer") {
+        continue;
+      }
       for (const userId of Object.keys(usersMap)) {
         chat.text = chat.text.replace(
           `<@${userId}>`,
           usersMap.get(userId) || "Unknown"
         );
       }
-      const speaker = usersMap.get(chat.user) || "Unknown";
       messages.push({
         role: "user",
         content: `${speaker}: ${chat.text}`,
         user: speaker,
       });
     }
-    console.log(messages.map((m) => m.user + ": " + m.content).join("\n"));
+    // console.log(messages.map((m) => m.user + ": " + m.content).join("\n"));
+    const systemPrmpt = systemPrompt(question);
+    if (question) {
+      messages.push({
+        role: "user",
+        content: `@#*&Question: ${question}`,
+        user: "definetly not a bot",
+      });
+    }
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-4o",
-      messages: [systemPrompt, ...messages],
+      messages: [systemPrmpt, ...messages],
+      temperature: 0.5,
     });
     return chatCompletion.choices[0].message.content || "No summary found.";
   } catch (error) {
@@ -143,10 +187,14 @@ async function postMessage(
   }
 }
 
-async function handleSummarizeRequest(channelId: string, threadTs?: string) {
+async function handleSummarizeRequest(
+  channelId: string,
+  question?: string,
+  threadTs?: string
+) {
   const messages = await fetchRecentMessages(channelId, 10, threadTs);
   if (messages.length > 0) {
-    const summary = await summarizeText(messages);
+    const summary = await summarizeText(messages, question);
 
     if (threadTs) {
       // Post in the same thread
@@ -158,18 +206,24 @@ async function handleSummarizeRequest(channelId: string, threadTs?: string) {
   }
 }
 
-app.message(/!summarize\s*([0-9]*)/, async ({ context, message, say }) => {
-  try {
-    const limit = parseInt(context.matches[1]) || 10;
-    const { channel, thread_ts } = message as SlackMessage;
-    const messages = await fetchRecentMessages(channel, limit, thread_ts);
-    if (messages.length > 0) {
-      await handleSummarizeRequest(channel, thread_ts);
+app.message(
+  /!summarize\s*(".*")?\s*([0-9]*)/,
+  async ({ context, message, say }) => {
+    try {
+      const question = context.matches[1];
+      const limit = parseInt(context.matches[2]) || 10;
+      console.log("Question: ", question);
+      console.log("Limit: ", limit);
+      const { channel, thread_ts } = message as SlackMessage;
+      const messages = await fetchRecentMessages(channel, limit, thread_ts);
+      if (messages.length > 0) {
+        await handleSummarizeRequest(channel, question, thread_ts);
+      }
+    } catch (error) {
+      console.error(`Error handling message event: ${error}`);
     }
-  } catch (error) {
-    console.error(`Error handling message event: ${error}`);
   }
-});
+);
 
 (async () => {
   // Start your app
