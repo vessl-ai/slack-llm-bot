@@ -93,7 +93,7 @@ async function fetchRecentMessages(
 //   }
 // };
 
-const systemPrompt = (
+const summarizeSystemPrompt = (
   question?: string
 ): {
   role: "system";
@@ -101,8 +101,13 @@ const systemPrompt = (
 } => {
   return {
     role: "system",
-    content:
-      "You are a helpful assistant. You will summarize the conversation using Korean only. You should answer the question if the last message starts with `@#*&Question: ` else you just create a helpful summary WITHOUT ORIGINAL MESSAGES. The summary should contain speaker names. Do not include the messages directly in the summary.",
+    content: `
+You are a helpful assistant.
+You will summarize the conversation using Korean only.
+You should answer the question if the last message starts with \`@#*&Question: \` else you just create a helpful summary WITHOUT ORIGINAL MESSAGES. 
+The summary should contain speaker names. 
+Do not include the messages directly in the summary.
+`,
   };
 };
 
@@ -123,49 +128,58 @@ async function summarizeText(
   chats: SlackMessage[],
   question?: string
 ): Promise<string> {
+  const usersMap = await getUserMap(chats.map((chat) => chat.user));
+  const messages: {
+    role: string;
+    content: string;
+    user?: string;
+  }[] = [];
+
+  const context: string[] = [];
+  for (const chat of chats) {
+    if (chat.text.startsWith("!summarize")) {
+      continue;
+    }
+    const speaker = usersMap.get(chat.user) || "Unknown";
+    if (speaker === "summarizer") {
+      continue;
+    }
+    if (chat.text.startsWith("<@U07AF4DJWRH>")) {
+      // ignore commands
+      continue;
+    }
+    for (const userId of Object.keys(usersMap)) {
+      chat.text = chat.text.replace(
+        `<@${userId}>`,
+        usersMap.get(userId) || "Unknown"
+      );
+    }
+    context.push(`${speaker}: ${chat.text}`);
+  }
+  messages.push({
+    role: "context",
+    content: `
+    THREAD_MESSAGE_CONTEXT:
+    ${context.join("\n")}
+    `,
+  });
+  // console.log(messages.map((m) => m.user + ": " + m.content).join("\n"));
+  const sysprmpt = summarizeSystemPrompt(question);
+  if (question) {
+    messages.push({
+      role: "user",
+      content: `@#*&Question: ${question}`,
+      user: "definetly not a bot",
+    });
+  }
+  return askOpenAI([sysprmpt, ...messages]);
+}
+
+async function askOpenAI(messages: any[]) {
   try {
-    const usersMap = await getUserMap(chats.map((chat) => chat.user));
-    const messages: {
-      role: "user";
-      content: string;
-      user: string;
-    }[] = [];
-    for (const chat of chats) {
-      if (chat.text.startsWith("!summarize")) {
-        continue;
-      }
-      const speaker = usersMap.get(chat.user) || "Unknown";
-      if (speaker === "summarizer") {
-        continue;
-      }
-      if (chat.text.startsWith("<@U07AF4DJWRH>")) {
-        // ignore commands
-        continue;
-      }
-      for (const userId of Object.keys(usersMap)) {
-        chat.text = chat.text.replace(
-          `<@${userId}>`,
-          usersMap.get(userId) || "Unknown"
-        );
-      }
-      messages.push({
-        role: "user",
-        content: `${speaker}: ${chat.text}`,
-        user: speaker,
-      });
-    }
-    // console.log(messages.map((m) => m.user + ": " + m.content).join("\n"));
-    const systemPrmpt = systemPrompt(question);
-    if (question) {
-      messages.push({
-        role: "user",
-        content: `@#*&Question: ${question}`,
-        user: "definetly not a bot",
-      });
-    }
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-4o",
-      messages: [systemPrmpt, ...messages],
+      messages,
       temperature: 0.5,
     });
     return chatCompletion.choices[0].message.content || "No summary found.";
@@ -205,6 +219,29 @@ async function handleSummarizeRequest(
   }
 }
 
+async function handleAskRequest(
+  channelId: string,
+  question?: string,
+  threadTs?: string
+) {
+  const assistantSystemPrompt = {
+    role: "system",
+    content: `
+You are a helpful assistant.
+The answer should be helpful and informative.
+The answer should be in Korean.
+The answer should be in a professional tone.
+The answer should be relevant to the question.
+`,
+  };
+  const userMsg = {
+    role: "user",
+    content: question,
+  };
+  const response = await askOpenAI([assistantSystemPrompt, userMsg]);
+  await postMessage(channelId, response, threadTs);
+}
+
 const options: { [key: string]: string } = {
   "--help": "Show help",
   "--version": "Show version",
@@ -220,7 +257,7 @@ app.event("app_mention", async ({ event, context }) => {
 
     if (prompt.trim() === "--help") {
       let helpText =
-        "```Usage: @Summarizer [summarize|question] [options]\n If no question is provided but 'summarize', the last 10 messages will be summarized.\n";
+        "```Usage: @Summarizer summarize [question] [options]\n If no question is provided but 'summarize', the last 10 messages will be summarized.\n";
       helpText += Object.keys(options)
         .map((key) => `${key}: ${options[key]}`)
         .join("\n");
@@ -242,11 +279,20 @@ app.event("app_mention", async ({ event, context }) => {
       limit = parseInt(parts[1].trim()) || 10;
     }
 
-    if (prompt.trim() !== "summarize") {
-      question = prompt;
+    if (prompt.trim().startsWith("summarize")) {
+      if (prompt.split(" ").length > 1) {
+        question = prompt.split(" ").slice(1).join(" ");
+      }
+      return await handleSummarizeRequest(channel, question, thread_ts, limit);
+    }
+    if (prompt.trim().startsWith("ask")) {
+      if (prompt.split(" ").length > 1) {
+        question = prompt.split(" ").slice(1).join(" ");
+      }
+      return await handleAskRequest(channel, question, thread_ts);
     }
 
-    await handleSummarizeRequest(channel, question, thread_ts, limit);
+    return await handleSummarizeRequest(channel, prompt, thread_ts, limit);
   } catch (error) {
     console.error(`Error handling app_mention event: ${error}`);
   }
