@@ -124,6 +124,21 @@ async function getUserMap(users: string[]): Promise<Map<string, string>> {
   return userMap;
 }
 
+function testIfContainsURL(text: string): boolean {
+  return /http(s)?:\/\/[^ ]*/.test(text);
+}
+
+async function getURLContent(url: string): Promise<string> {
+  try {
+    const response = await fetch(url);
+    const text = await response.text();
+    return text;
+  } catch (error) {
+    console.error(`Error fetching URL content: ${error}`);
+    return "";
+  }
+}
+
 async function summarizeText(
   chats: SlackMessage[],
   question?: string
@@ -153,6 +168,20 @@ async function summarizeText(
         `<@${userId}>`,
         usersMap.get(userId) || "Unknown"
       );
+      if (testIfContainsURL(chat.text)) {
+        const url = chat.text.match(/http(s)?:\/\/[^ ]*/);
+        if (url) {
+          try {
+            chat.text += `\nADDITIONAL_REMOTE_CONTEXT_FROM ${url[0]}: 
+${await getURLContent(url[0])}
+`;
+          } catch (error) {
+            console.error(
+              `Error fetching URL content for url ${url[0]}: ${error}`
+            );
+          }
+        }
+      }
     }
     context.push(`${speaker}: ${chat.text}`);
   }
