@@ -105,7 +105,6 @@ const summarizeSystemPrompt = (
 You are a helpful assistant.
 You will summarize the conversation using Korean only.
 You should answer the question if the last message starts with \`@#*&Question: \` else you just create a helpful summary WITHOUT ORIGINAL MESSAGES. 
-The summary should contain speaker names. 
 Do not include the messages directly in the summary.
 If user request to summarize in specific form, follow the request.
 `,
@@ -158,7 +157,7 @@ async function summarizeText(
     context.push(`${speaker}: ${chat.text}`);
   }
   messages.push({
-    role: "context",
+    role: "tool",
     content: `
     THREAD_MESSAGE_CONTEXT:
     ${context.join("\n")}
