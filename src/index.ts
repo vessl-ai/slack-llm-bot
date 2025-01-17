@@ -157,7 +157,7 @@ async function summarizeText(
     context.push(`${speaker}: ${chat.text}`);
   }
   messages.push({
-    role: "tool",
+    role: "system",
     content: `
     THREAD_MESSAGE_CONTEXT:
     ${context.join("\n")}
